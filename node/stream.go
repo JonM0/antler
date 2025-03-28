@@ -252,6 +252,18 @@ func (s *StreamClient) Run(ctx context.Context, arg runArg) (ofb Feedback,
 		return
 	}
 	r := s.streamer()
+	if repeatIndex, ok := ctx.Value(flowIndexCtxKey{}).(int); ok {
+		if rr, ok := r.(*Upload); ok {
+			rr := *rr
+			rr.Flow = Flow(fmt.Sprintf("%s-%d", rr.Flow, repeatIndex))
+			r = &rr
+		}
+		if rr, ok := r.(*Download); ok {
+			rr := *rr
+			rr.Flow = Flow(fmt.Sprintf("%s-%d", rr.Flow, repeatIndex))
+			r = &rr
+		}
+	}
 	d := net.Dialer{}
 	if r, ok := r.(dialController); ok {
 		d.Control = r.dialControl

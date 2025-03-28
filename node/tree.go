@@ -24,6 +24,10 @@ func buildTree(run *Run, tre Tree) {
 		rr = run.Parallel
 	case run.Schedule != nil:
 		rr = run.Schedule.Run
+	case run.ClosedLoopActor != nil:
+		rr = []Run{run.ClosedLoopActor.Run}
+	case run.Random != nil:
+		rr = run.Random.Run
 	case run.Child != nil:
 		var ok bool
 		var t Tree

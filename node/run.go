@@ -33,6 +33,12 @@ type Run struct {
 	// Schedule lists Runs to be executed on a schedule.
 	Schedule *Schedule
 
+	// ClosedLoopActor alternates a thinking phase with a Run phase.
+	ClosedLoopActor *ClosedLoopActor
+
+	// Random executes a random Run from a list of Runs.
+	Random *Random
+
 	// Child is a Run to be executed on a child Node
 	Child *Child
 
@@ -53,6 +59,10 @@ func (r *Run) run(ctx context.Context, arg runArg, ev chan event) (
 		ofb, ok = r.Parallel.do(ctx, arg, ev)
 	case r.Schedule != nil:
 		ofb, ok = r.Schedule.do(ctx, arg, ev)
+	case r.ClosedLoopActor != nil:
+		ofb, ok = r.ClosedLoopActor.do(ctx, arg, ev)
+	case r.Random != nil:
+		ofb, ok = r.Random.do(ctx, arg, ev)
 	case r.Child != nil:
 		ofb, ok = r.Child.do(ctx, arg, ev)
 	default:
@@ -78,6 +88,18 @@ func (r *Run) Validate() (err error) {
 	}
 	if r.Schedule != nil {
 		if err = r.Schedule.validate(); err != nil {
+			return
+		}
+		n++
+	}
+	if r.ClosedLoopActor != nil {
+		if err = r.ClosedLoopActor.validate(); err != nil {
+			return
+		}
+		n++
+	}
+	if r.Random != nil {
+		if err = r.Random.validate(); err != nil {
 			return
 		}
 		n++
@@ -210,6 +232,26 @@ func (r *Child) validate() (err error) {
 	return
 }
 
+// RandomRunner is a base type for runners that use a random number generator.
+type RandomRunner struct {
+	// Seed is the seed for the random number generator. If 0, the current
+	// time is used as the seed.
+	Seed int64
+
+	// rand is the random number generator.
+	rand *rand.Rand
+}
+
+// initRandom initializes the random number generator.
+func (r *RandomRunner) initRandom() {
+	if r.rand == nil {
+		if r.Seed == 0 {
+			r.Seed = time.Now().UnixNano()
+		}
+		r.rand = rand.New(rand.NewSource(r.Seed))
+	}
+}
+
 // Schedule lists Runs to be executed with wait times between each Run.
 type Schedule struct {
 	// Wait lists the wait Durations to use. If Random is false, the chosen
@@ -232,8 +274,7 @@ type Schedule struct {
 	// waitIndex is the current index in Wait.
 	waitIndex int
 
-	// rand provides random wait times when Random is true.
-	rand *rand.Rand
+	RandomRunner
 }
 
 // do executes Schedule's Runs on a schedule.
@@ -298,9 +339,7 @@ func (s *Schedule) nextWait() (wait time.Duration) {
 		return
 	}
 	if s.Random {
-		if s.rand == nil {
-			s.rand = rand.New(rand.NewSource(time.Now().UnixNano()))
-		}
+		s.initRandom()
 		wait = time.Duration(s.Wait[s.rand.Intn(len(s.Wait))])
 		return
 	}
@@ -317,6 +356,152 @@ func (s *Schedule) validate() (err error) {
 		if err = r.Validate(); err != nil {
 			return
 		}
+	}
+	return
+}
+
+// ClosedLoopActor is a runner that alternates an exponentially distributed
+// thinking phase with a Run phase.
+type ClosedLoopActor struct {
+	// Duration is the lifetime of the runner.
+	Duration metric.Duration
+
+	// ThinkingTime is the mean time of the thinking phase.
+	ThinkingTime metric.Duration
+
+	// Run is the Run to execute every time the thinking phase ends.
+	Run
+
+	RandomRunner
+}
+
+// flowIndexCtxKey is the context key used to store what iteration a
+// ClosedLoopActor is on, so that a unique Flow name can be generated for each
+// iteration.
+type flowIndexCtxKey struct{}
+
+// do alternates waiting for a thinking phase to end with executing the Run.
+func (a *ClosedLoopActor) do(ctx context.Context, arg runArg, ev chan event) (
+	ofb Feedback, ok bool) {
+	ofb = Feedback{}
+	ok = true
+	var i int
+
+	a.initRandom()
+
+	dc := ctx.Done()
+	end := time.After(time.Duration(a.Duration))
+	w := time.After(a.nextWait())
+
+	for ok {
+		select {
+		case <-dc:
+			return
+		case <-end:
+			return
+		case <-w:
+			ctx := context.WithValue(ctx, flowIndexCtxKey{}, i)
+			var fb Feedback
+			fb, ok = a.Run.run(ctx, arg, ev)
+			w = time.After(a.nextWait())
+			i++
+
+			if e := ofb.merge(fb); e != nil {
+				ok = false
+				rr := arg.rec.WithTag(typeBaseName(a.Run))
+				ev <- errorEvent{rr.NewErrore(e), false}
+			}
+		}
+	}
+	return
+}
+
+// nextWait returns the next wait time, which is a random duration
+// exponentially distributed with a mean of ThingkingTime.
+func (a *ClosedLoopActor) nextWait() time.Duration {
+	return time.Duration(a.rand.ExpFloat64() * float64(a.ThinkingTime))
+}
+
+// validate returns the validation error from the Run.
+func (a *ClosedLoopActor) validate() (err error) {
+	if err = a.Run.Validate(); err != nil {
+		return
+	}
+	return
+}
+
+// Random executes a random Run from a list of Runs.
+type Random struct {
+	// Run is a list of Runs to sample from.
+	Run []Run
+
+	// Weights is a list of weights for each Run. If nil, the Runs are
+	// selected uniformly. If not nil, the Runs are selected with a
+	// probability proportional to the weight of each Run.
+	Weights []float64
+
+	cumulativeWeights []float64
+	RandomRunner
+}
+
+// do executes a random Run from the list of Runs.
+func (r *Random) do(ctx context.Context, arg runArg, ev chan event) (
+	ofb Feedback, ok bool) {
+	r.initRandom()
+	run := r.sampleRun()
+	ofb, ok = run.run(ctx, arg, ev)
+	return
+}
+
+// sampleRun returns a random Run from the list of Runs. If Weights is nil,
+// a random Run is selected uniformly. If Weights is not nil, a random Run is
+// selected with a probability proportional to the weight of each Run.
+func (r *Random) sampleRun() (run *Run) {
+	if len(r.Run) == 0 {
+		return nil
+	}
+	if r.Weights == nil {
+		// when no weights are specified, select a random run uniformly
+		run = &r.Run[r.rand.Intn(len(r.Run))]
+	} else {
+		// lazy init cumulative weights
+		if r.cumulativeWeights == nil {
+			r.cumulativeWeights = make([]float64, len(r.Weights))
+			r.cumulativeWeights[0] = r.Weights[0]
+			for i := 1; i < len(r.Weights); i++ {
+				r.cumulativeWeights[i] = r.cumulativeWeights[i-1] + r.Weights[i]
+			}
+		}
+		// obtain a random value in the range of [0, sum(weights))
+		randVal := r.rand.Float64() * r.cumulativeWeights[len(r.cumulativeWeights)-1]
+
+		// binary search for the first weight that is greater than the random value
+		low, high := 0, len(r.cumulativeWeights)-1
+		for low < high {
+			mid := (low + high) / 2
+			if r.cumulativeWeights[mid] <= randVal {
+				low = mid + 1
+			} else {
+				high = mid
+			}
+		}
+		run = &r.Run[low]
+	}
+	return
+}
+
+// validate returns the first validation error from each of the Runs.
+// If Weights is not nil, it must have the same number of elements as Run.
+func (r *Random) validate() (err error) {
+	for _, r := range r.Run {
+		if err = r.Validate(); err != nil {
+			return
+		}
+	}
+	if r.Weights != nil && len(r.Run) != len(r.Weights) {
+		err = fmt.Errorf("number of weights (%d) must match number of runs (%d)",
+			len(r.Weights), len(r.Run))
+		return
 	}
 	return
 }

@@ -485,6 +485,8 @@ _IDregex: "[a-zA-Z0-9][a-zA-Z0-9_-]*"
 	Serial?: [...#Run]
 	Parallel?: [...#Run]
 	Schedule?: #Schedule
+	ClosedLoopActor?: #ClosedLoopActor
+	Random?:   #Random
 	Child?:    #Child
 }
 
@@ -501,6 +503,26 @@ _IDregex: "[a-zA-Z0-9][a-zA-Z0-9_-]*"
 	Sequential?: bool
 	WaitFirst?:  bool
 	Run: [...#Run]
+	Seed?: int
+}
+
+// node.ClosedLoopActor is a closed loop actor that runs a Run in a loop,
+// sleeping for ThinkingTime between each iteration. The Run is executed
+// sequentially, and the ThinkingTime is not included in the Run duration.
+#ClosedLoopActor: {
+	Duration: 		#Duration
+	ThinkingTime: 	#Duration
+	#Run
+	Seed?: int
+}
+
+// node.Random executes a random Run out of a list of Runs.
+// The Weights field may be used to set the probability of each Run being
+// selected.
+#Random: {
+	Run: [...#Run]
+	Weights?: [...float]
+	Seed?: int
 }
 
 // node.Child defines a Run to execute on a child Node. In this way, entire Run
