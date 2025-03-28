@@ -6,6 +6,7 @@ package antler
 import (
 	"context"
 	"encoding/gob"
+	"encoding/json"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -69,6 +70,7 @@ type reporters struct {
 	Analyze          *Analyze
 	EmitLog          *EmitLog
 	EmitSysInfo      *EmitSysInfo
+	EmitStreamStats  *EmitStreamStats
 	ChartsFCT        *ChartsFCT
 	ChartsTimeSeries *ChartsTimeSeries
 	SaveFiles        *SaveFiles
@@ -104,6 +106,10 @@ func (r *reporters) value() (rr reporter, n int) {
 	}
 	if r.EmitSysInfo != nil {
 		rr = r.EmitSysInfo
+		n++
+	}
+	if r.EmitStreamStats != nil {
+		rr = r.EmitStreamStats
 		n++
 	}
 	if r.ChartsFCT != nil {
@@ -361,6 +367,34 @@ func (c *Encode) encode(name string, rw rwer) (err error) {
 	_, err = io.Copy(w, r)
 	if err == nil && c.Destructive && r.Name != w.Name {
 		err = rw.Remove(r.Name)
+	}
+	return
+}
+
+// EmitStreamStats is a reporter that emits stream statistics as a JSON file.
+type EmitStreamStats struct {
+	Name string
+}
+
+// report implements reporter
+func (e *EmitStreamStats) report(ctx context.Context, rw rwer, in <-chan any,
+	out chan<- any) (err error) {	
+	var a analysis
+	for d := range in {
+		out <- d
+		var ok bool
+		if a, ok = d.(analysis); ok {
+			break
+		}
+	}
+	var data []byte
+	data, err = json.Marshal(a.streams)
+	if err != nil {
+		return
+	}
+	out <- node.FileData{
+		Name: e.Name,
+		Data: data,
 	}
 	return
 }

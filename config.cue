@@ -199,6 +199,7 @@ _IDregex: "[a-zA-Z0-9][a-zA-Z0-9_-]*"
 	Encode?:           #Encode
 	EmitLog?:          #EmitLog
 	EmitSysInfo?:      #EmitSysInfo
+	EmitStreamStats?:  #EmitStreamStats
 	ChartsTimeSeries?: #ChartsTimeSeries
 	ChartsFCT?:        #ChartsFCT
 	SaveFiles?:        #SaveFiles
@@ -426,6 +427,12 @@ _IDregex: "[a-zA-Z0-9][a-zA-Z0-9_-]*"
 // true, FileData items are not forwarded to the next stage in the pipeline.
 #SaveFiles: {
 	Consume: bool | *true
+}
+
+// antler.EmitStreamStats is a report that emits stream statistics. The
+// statistics are emitted to the given file.
+#EmitStreamStats: {
+	Name: string & !=""
 }
 
 // antler.MultiReport contains one definition for a multi-Test report.
