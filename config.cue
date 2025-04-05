@@ -626,6 +626,7 @@ _IDregex: "[a-zA-Z0-9][a-zA-Z0-9_-]*"
 	Sleep?:        #Duration
 	ResultStream?: #ResultStream
 	SysInfo?:      #SysInfo
+	SysProcMonitor?: #SysProcMonitor
 	System?:       #System
 	PacketClient?: #PacketClient
 	PacketServer?: #PacketServer
@@ -716,6 +717,12 @@ _IDregex: "[a-zA-Z0-9][a-zA-Z0-9_-]*"
 
 // node.Sysctls represents a list of patterns of sysctl parameter names.
 #Sysctls: [...string & !=""]
+
+#SysProcMonitor: {
+	ProcFiles: [...string & !=""]
+	Interval: #Duration
+	Out: string & !=""
+}
 
 // node.System is a system command Runner. See the Go documentation in
 // node/system.go for explanations of each field. Often the Command field is

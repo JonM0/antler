@@ -520,6 +520,7 @@ type Runners struct {
 	Setup        *setup
 	Sleep        *Sleep
 	SysInfo      *SysInfo
+	SysProcMonitor *SysProcMonitor
 	System       *System
 	StreamClient *StreamClient
 	StreamServer *StreamServer
@@ -568,6 +569,10 @@ func (r *Runners) value() (rr runner, n int) {
 	}
 	if r.SysInfo != nil {
 		rr = r.SysInfo
+		n++
+	}
+	if r.SysProcMonitor != nil {
+		rr = r.SysProcMonitor
 		n++
 	}
 	if r.System != nil {
