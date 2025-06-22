@@ -9,10 +9,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"iter"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 
 	"github.com/heistp/antler/node"
+	"github.com/heistp/antler/node/metric"
 )
 
 // A reporter can process data items from the node for a single Test. It is run
@@ -376,9 +379,31 @@ type EmitStreamStats struct {
 	Name string
 }
 
+type streamData struct {
+	Flow   node.Flow
+	FCT    metric.Duration
+	Length metric.Bytes
+	StartT metric.RelativeTime
+}
+
+func iterStreamData(streams streams) iter.Seq[streamData] {
+	return func(yield func(streamData) bool) {
+		for _, s := range streams {
+			if !yield(streamData{
+				Flow:   s.Flow,
+				Length: s.Length,
+				FCT:    s.FCT,
+				StartT: s.Sent[0].T,
+			}) {
+				return
+			}
+		}
+	}
+}
+
 // report implements reporter
 func (e *EmitStreamStats) report(ctx context.Context, rw rwer, in <-chan any,
-	out chan<- any) (err error) {	
+	out chan<- any) (err error) {
 	var a analysis
 	for d := range in {
 		out <- d
@@ -387,8 +412,9 @@ func (e *EmitStreamStats) report(ctx context.Context, rw rwer, in <-chan any,
 			break
 		}
 	}
+	streamsdata := slices.Collect(iterStreamData(a.streams))
 	var data []byte
-	data, err = json.Marshal(a.streams)
+	data, err = json.Marshal(streamsdata)
 	if err != nil {
 		return
 	}
